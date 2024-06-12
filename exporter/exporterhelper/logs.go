@@ -6,6 +6,7 @@ package exporterhelper // import "go.opentelemetry.io/collector/exporter/exporte
 import (
 	"context"
 	"errors"
+	"os"
 
 	"go.uber.org/zap"
 
@@ -145,17 +146,28 @@ func NewLogsRequestExporter(
 }
 
 type logsExporterWithObservability struct {
+	shouldCountItemsBeforeSend bool
 	baseRequestSender
 	obsrep *ObsReport
 }
 
 func newLogsExporterWithObservability(obsrep *ObsReport) requestSender {
-	return &logsExporterWithObservability{obsrep: obsrep}
+	return &logsExporterWithObservability{obsrep: obsrep, shouldCountItemsBeforeSend: len(os.Getenv("ACIES_PLOG_EXPERIMENT")) > 0}
 }
 
 func (lewo *logsExporterWithObservability) send(ctx context.Context, req Request) error {
 	c := lewo.obsrep.StartLogsOp(ctx)
+	numLogRecords := 0
+	if lewo.shouldCountItemsBeforeSend {
+		numLogRecords = req.ItemsCount()
+	}
 	err := lewo.nextSender.send(c, req)
-	lewo.obsrep.EndLogsOp(c, req.ItemsCount(), err)
+
+	if lewo.shouldCountItemsBeforeSend {
+		lewo.obsrep.EndLogsOp(c, numLogRecords, err)
+	} else {
+		lewo.obsrep.EndLogsOp(c, req.ItemsCount(), err)
+	}
+
 	return err
 }
